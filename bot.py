@@ -9,7 +9,7 @@ from urllib.error import HTTPError, URLError
 from urllib.parse import urlencode
 from urllib.request import Request, urlopen
 
-TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "")
+TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "").strip()
 API = f"https://api.telegram.org/bot{TOKEN}/"
 APPEAL_URL = "https://help.x.com/en/forms/account-access/appeals"
 COPYRIGHT_URL = "https://help.x.com/en/rules-and-policies/copyright-policy"
@@ -43,6 +43,25 @@ TEMPLATES = {
     "other": """Hello Twitter Support Team, I am submitting an appeal against the suspension of my account on charges of impersonation. I would like to clarify that I did not impersonate anyone, and this is a mistake on your part or on the part of the automated systems. Please reconsider the suspension of my account, please, as it is very important to me and I love this platform very much. With sincere respect and greetings.""",
 }
 SESSIONS = {}  # In memory only; restarting the bot deletes the drafts.
+
+
+def error_summary(exc):
+    """Report API errors without logging request URLs or the bot token."""
+    if not isinstance(exc, HTTPError):
+        return type(exc).__name__
+    description = ""
+    try:
+        payload = json.loads(exc.read(8192).decode("utf-8"))
+        if isinstance(payload, dict) and isinstance(payload.get("description"), str):
+            description = payload["description"]
+    except (ValueError, OSError):
+        pass
+    if TOKEN:
+        description = description.replace(TOKEN, "[REDACTED]")
+    description = re.sub(r"https?://\S+", "[URL REDACTED]", description)
+    description = re.sub(r"\d{5,}:[A-Za-z0-9_-]+", "[REDACTED]", description)
+    description = " ".join(description.split())[:400]
+    return f"HTTP {exc.code}" + (f": {description}" if description else "")
 
 
 def api(method, params):
@@ -110,6 +129,7 @@ def main():
     if not TOKEN:
         raise SystemExit("اضبط متغير TELEGRAM_BOT_TOKEN أولًا.")
     logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s")
+    logging.info("Bot started; waiting for Telegram messages (diagnostics v2).")
     offset = None
     while True:
         try:
@@ -120,10 +140,10 @@ def main():
                 offset = update["update_id"] + 1
                 try:
                     handle_message(update.get("message", {}))
-                except (HTTPError, URLError, ValueError) as exc:
-                    logging.warning("Could not process message: %s", type(exc).__name__)
-        except (HTTPError, URLError, ValueError) as exc:
-            logging.warning("Connection issue: %s", type(exc).__name__)
+                except (HTTPError, URLError, ValueError, TimeoutError) as exc:
+                    logging.warning("Could not process message: %s", error_summary(exc))
+        except (HTTPError, URLError, ValueError, TimeoutError) as exc:
+            logging.warning("Telegram getUpdates failed: %s", error_summary(exc))
             time.sleep(5)
 
 
