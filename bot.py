@@ -14,11 +14,33 @@ API = f"https://api.telegram.org/bot{TOKEN}/"
 APPEAL_URL = "https://help.x.com/en/forms/account-access/appeals"
 COPYRIGHT_URL = "https://help.x.com/en/rules-and-policies/copyright-policy"
 CHOICES = {
-    "سبب غير معروف": "unknown",
-    "اشتباه نشاط آلي": "automation",
-    "حساب مخترق": "compromised",
-    "حقوق نشر": "copyright",
-    "سبب آخر": "other",
+    "تهمة التزييف": "counterfeit",
+    "تهمة حسابات غير موثوقة": "inauthentic",
+    "تهمة حقوق النشر": "copyright",
+    "سبب اخر": "other",
+}
+TEMPLATES = {
+    "counterfeit": """إلى السيد/ة المسؤول/ة في فريق دعم العملاء في تويتر،
+
+أتقدم بخالص اعتذاري عن أي إزعاج قد تسبب فيه حسابي الذي تم تعطيله عن طريق الخطأ. أرجو منكم أخذ هذه الرسالة بعين الاعتبار وإعادة النظر في قرار تعطيل الحساب الذي يحمل اسم المستخدم: [username@].
+
+أود التأكيد على أنني لم أنتهك أي من شروط الاستخدام التابعة لخدمتكم، وأنني أقدر قواعد المجتمع وأتبعها بدقة. أعتقد بأن هذا الإجراء قد تم بشكل غير مبرر، وأنا على استعداد لتقديم أي معلومات إضافية قد تحتاجونها لإثبات هويتي ونزاهة استخدام الحساب.
+
+أتمنى من فضلكم إعادة تفعيل حسابي في أسرع وقت ممكن، حيث أعتبر حسابي وسيلة مهمة للتواصل مع العائلة والأصدقاء ولأغراض عملي.
+
+أشكركم على تعاونكم وفهمكم، وأتطلع لاستعادة حسابي قريبًا.""",
+    "inauthentic": """مرحبًا فريق دعم X، أتقدم بطلب لإعادة النظر في إيقاف حسابي @username، وأرجو إحالة هذا الالتماس إلى أحد المختصين لإجراء مراجعة بشرية للحساب والسبب الذي استند إليه القرار.
+
+أطلب توضيح المخالفة المحددة والمحتوى المرتبط بها، حتى أتمكن من تقديم رد دقيق ومعالجة أي مشكلة.
+
+ألتزم باحترام قواعد X، وأنا مستعد لاتخاذ الخطوات المطلوبة لتصحيح أي مخالفة تثبت بعد المراجعة.
+
+يرجى إعادة تفعيل الحساب إذا تبيّن أن الإيقاف وقع بالخطأ، وإبلاغي بنتيجة المراجعة وأسبابها عبر البريد الإلكتروني المرتبط بالحساب.
+
+شكرًا لوقتكم ومساعدتكم.""",
+    "copyright": """Hello dear Twitter team, my account has been suspended ( @username ) due to violation of rights, and after filing DMCA a counter-report, I received a response from you, returning the account within 10 days, 
+‎‏It's been 9 months and I haven't received a response. Please reactivate my account and thank you""",
+    "other": """Hello Twitter Support Team, I am submitting an appeal against the suspension of my account on charges of impersonation. I would like to clarify that I did not impersonate anyone, and this is a mistake on your part or on the part of the automated systems. Please reconsider the suspension of my account, please, as it is very important to me and I love this platform very much. With sincere respect and greetings.""",
 }
 SESSIONS = {}  # In memory only; restarting the bot deletes the drafts.
 
@@ -48,21 +70,10 @@ def valid_handle(value):
     return None
 
 
-def draft(handle, reason, detail):
-    detail = " ".join(detail.split())
-    introductions = {
-        "unknown": "I am appealing the suspension of my account because I do not understand the reason for this action.",
-        "automation": "I am requesting a review of the restriction placed on my account in connection with suspected automated activity.",
-        "compromised": "I am requesting a review of my account restriction after noticing possible unauthorized access.",
-        "copyright": "I am requesting clarification and a review of the action taken on my account regarding a copyright complaint.",
-        "other": "I am requesting a review of the action taken on my account.",
-    }
-    return (
-        f"Hello X Support,\n\nMy account is {handle}. {introductions[reason]}\n\n"
-        f"Here is what happened, to the best of my knowledge: {detail}\n\n"
-        "Please review my account and let me know what steps I can take to resolve this issue. "
-        "Thank you."
-    )
+def draft(handle, reason):
+    # Replace only the placeholder; preserve all other characters verbatim.
+    username = handle.removeprefix("@")
+    return TEMPLATES[reason].replace("username", username)
 
 
 def handle_message(message):
@@ -91,21 +102,8 @@ def handle_message(message):
         if text not in CHOICES:
             send(chat_id, "اختر أحد الأسباب من الأزرار.", list(CHOICES))
             return
-        state.update(reason=CHOICES[text], step="detail")
-        extra = "\nإذا كان الموضوع حقوق نشر، لا تقدّم إشعارًا مضادًا إلا إذا كنت متأكدًا من صحة موقفك؛ له تبعات قانونية." if state["reason"] == "copyright" else ""
-        send(chat_id, "احكِ باختصار ماذا حدث، ومتى عرفت بالإيقاف، وما الذي تريد من الدعم مراجعته. اكتب الحقائق فقط ولا ترسل كلمات مرور أو رموز تحقق أو بيانات شخصية." + extra)
-    elif state["step"] == "detail":
-        if len(text) < 15 or len(text) > 1200:
-            send(chat_id, "اكتب وصفًا من 15 إلى 1200 حرف، بدون معلومات حساسة.")
-            return
-        if re.search(r"(?:password|كلمة\s*(?:المرور|السر)|رمز\s*التحقق|otp)\s*[:：=]", text, re.I):
-            send(chat_id, "يبدو أن رسالتك تحتوي على بيانات دخول؛ رجاءً احذفها وأرسل وصفًا عامًا فقط.")
-            return
-        result = draft(state["handle"], state["reason"], text)
-        SESSIONS.pop(chat_id, None)
-        send(chat_id, "هذا نص مقترح بالإنجليزية؛ راجعه وعدّل أي شيء غير دقيق قبل إرساله:\n\n" + result)
-        notice = "\n\nتنبيه: الإشعار المضاد لحقوق النشر إجراء قانوني مختلف، وليس النص أعلاه إشعارًا مضادًا. اقرأ سياسة X أولًا:\n" + COPYRIGHT_URL if state["reason"] == "copyright" else ""
-        send(chat_id, "رابط الاستئناف الرسمي (افتحه وأنت مسجّل دخولك إلى الحساب الموقوف):\n" + APPEAL_URL + notice + "\n\nلصياغة نص جديد أرسل /start", ["بدء طلب جديد"])
+        result = draft(state["handle"], CHOICES[text])
+        send(chat_id, result, list(CHOICES))
 
 
 def main():
